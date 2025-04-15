@@ -142,6 +142,24 @@ extern pg_crc32c pg_comp_crc32c_sb8(pg_crc32c crc, const void *data, size_t len)
 extern pg_crc32c (*pg_comp_crc32c) (pg_crc32c crc, const void *data, size_t len);
 extern pg_crc32c pg_comp_crc32c_armv8(pg_crc32c crc, const void *data, size_t len);
 
+#elif defined(USE_S390X_CRC32C)
+
+#define COMP_CRC32C(crc, data, len)							\
+	((crc) = pg_comp_crc32c_s390x((crc), (data), (len)))
+#define FIN_CRC32C(crc) ((crc) = pg_bswap32(crc) ^ 0xFFFFFFFF)
+
+extern pg_crc32c pg_comp_crc32c_sb8(pg_crc32c crc, const void *data, size_t len);
+extern pg_crc32c pg_comp_crc32c_s390x(pg_crc32c crc, const void *data, size_t len);
+
+#elif defined(USE_S390X_CRC32C_WITH_RUNTIME_CHECK)
+#define COMP_CRC32C(crc, data, len)							\
+	((crc) = pg_comp_crc32c((crc), (data), (len)))
+#define FIN_CRC32C(crc) ((crc) = pg_bswap32(crc) ^ 0xFFFFFFFF)
+
+extern pg_crc32c pg_comp_crc32c_sb8(pg_crc32c crc, const void *data, size_t len);
+extern pg_crc32c (*pg_comp_crc32c) (pg_crc32c crc, const void *data, size_t len);
+extern pg_crc32c pg_comp_crc32c_s390x(pg_crc32c crc, const void *data, size_t len);
+
 #else
 /*
  * Use slicing-by-8 algorithm.

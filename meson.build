@@ -2242,6 +2242,12 @@ __atomic_compare_exchange_n(&val, &expect, 37, 0, __ATOMIC_SEQ_CST, __ATOMIC_REL
 int64_t val = 0;
 int64_t expect = 0;
 __atomic_compare_exchange_n(&val, &expect, 37, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);'''},
+
+  {'name': 'HAVE_GCC__ATOMIC_STORE_N',
+   'desc': '__atomic_store_n(int64)',
+   'test': '''
+int64_t val = 0;
+__atomic_store_n(&val,1,__ATOMIC_SEQ_CST);'''},
 ]
 
 foreach check : atomic_checks
@@ -2530,6 +2536,43 @@ int main(void)
     have_optimized_crc = true
   endif
 
+elif host_cpu == 's390x' and cdata.get('HAVE_GCC__ATOMIC_STORE_N') == 0
+  message('s390x crc32c-vx extention disabled due to missing `__store_atomic_n()`')
+
+elif host_cpu == 's390x' and cc.get_id() == 'clang' and cc.version().version_compare('>=18.0.0') and cc.version().version_compare('<19.1.2') 
+  message('S390X CRC32C-VX optimizations are broken due to compiler bug in Clang versions: 18.0.0 <= clang_version < 19.1.2')
+  message('Unless another compiler or compiler version is used the S390X CRC32C-VX optimisation is disabled.')
+
+elif host_cpu == 's390x'
+  if cc.get_id() == 'clang'
+    VGFMAFLAG='-fzvector'
+  else
+    VGFMAFLAG='-mzarch'
+  endif
+
+  prog = '''
+#include <vecintrin.h>
+int main(void) {
+    // test for vector extension
+    unsigned long long a __attribute__((vector_size(16))) = { 0 };
+    unsigned long long b __attribute__((vector_size(16))) = { 0 };
+    unsigned char c __attribute__((vector_size(16))) = { 0 };
+    c = vec_gfmsum_accum_128(a, b, c);
+    return c[0];
+}'''
+  if cc.links(prog, name: 's390x_vector_vx', args: test_c_args + [VGFMAFLAG])
+    # Use S390X CRC Extension unconditionally
+    cdata.set('USE_S390X_CRC32C',1)
+    cflags_crc += VGFMAFLAG
+    have_optimized_crc = true
+  elif cc.links(prog, name: 's390x_vector_vx+march=z13', args: test_c_args + [VGFMAFLAG, '-march=z13'])
+    # Use S390X CRC Extension, with runtime check
+    cdata.set('USE_S390X_CRC32C',false)
+    cdata.set('USE_S390X_CRC32C_WITH_RUNTIME_CHECK',1)
+    cflags_crc += VGFMAFLAG
+    cflags_crc += '-march=z13'
+    have_optimized_crc = true
+  endif
 endif
 
 if not have_optimized_crc
