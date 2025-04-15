@@ -2547,6 +2547,49 @@ int main(void)
     have_optimized_crc = true
   endif
 
+elif host_cpu == 's390x' and cc.has_function('getauxval')
+  if cc.get_id() == 'clang'
+    VGFMAFLAG='-fzvector'
+  else
+    VGFMAFLAG='-mzarch'
+  endif
+
+  prog = '''
+#ifdef __clang__
+#  if ((__clang_major__ == 18) || (__clang_major__ == 19 && (__clang_minor__ < 1 || (__clang_minor__ == 1 && __clang_patchlevel__ < 2))))
+# error CRC32-VX optimizations are broken due to compiler bug in Clang versions: 18.0.0 <= clang_version < 19.1.2. Either disable the CRC32-VX optimization, or switch to another compiler/compiler version.
+#  endif
+#endif
+#ifdef __GNUC__
+# if ((__GNUC__ == 14) && (__GNUC_MINOR__ < 3))
+#  error CRC32-VX optimizations are broken due to compiler bug in GCC versions: 14.0.0 <= gcc_version < 14.3.0 Either disable the CRC32-VX optimization, or switch to another compiler/compiler version.
+# endif
+#endif
+#include <vecintrin.h>
+unsigned long long a __attribute__((vector_size(16))) = { 0 };
+unsigned long long b __attribute__((vector_size(16))) = { 0 };
+unsigned char c __attribute__((vector_size(16))) = { 0 };
+
+int main(void) {
+    // test for vector extension
+    // we can safely assume that if we have vec_gfmsum_accum_128
+    // we will have all needed builtins
+    c = vec_gfmsum_accum_128(a, b, c);
+    return c[0];
+}'''
+  if cc.links(prog, name: 's390x_vector_vx', args: test_c_args + [VGFMAFLAG])
+    # Use S390X CRC Extension unconditionally
+    cdata.set('USE_S390X_CRC32C',1)
+    cflags_crc += VGFMAFLAG
+    have_optimized_crc = true
+  elif cc.links(prog, name: 's390x_vector_vx+march=z13', args: test_c_args + [VGFMAFLAG, '-march=z13'])
+    # Use S390X CRC Extension, with runtime check
+    cdata.set('USE_S390X_CRC32C',false)
+    cdata.set('USE_S390X_CRC32C_WITH_RUNTIME_CHECK',1)
+    cflags_crc += VGFMAFLAG
+    cflags_crc += '-march=z13'
+    have_optimized_crc = true
+  endif
 endif
 
 if not have_optimized_crc
