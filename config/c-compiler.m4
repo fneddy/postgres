@@ -545,6 +545,21 @@ if test x"$pgac_cv_gcc_atomic_int64_cas" = x"yes"; then
   AC_DEFINE(HAVE_GCC__ATOMIC_INT64_CAS, 1, [Define to 1 if you have __atomic_compare_exchange_n(int64 *, int64 *, int64).])
 fi])# PGAC_HAVE_GCC__ATOMIC_INT64_CAS
 
+# PGAC_HAVE_GCC__ATOMIC_STORE_N
+# -----------------------------
+# Check if the compiler understands __atomic_store_n for 64bit
+# types, and define HAVE_GCC__ATOMIC_STORE_N if so.
+AC_DEFUN([PGAC_HAVE_GCC__ATOMIC_STORE_N],
+[AC_CACHE_CHECK(for builtin __atomic int64 atomic store operations, pgac_cv_gcc_atomic_store_n,
+[AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <stdint.h>],
+  [int64_t val = 0;
+   __atomic_store_n(&val,1,__ATOMIC_SEQ_CST);])],
+  [pgac_cv_gcc_atomic_store_n="yes"],
+  [pgac_cv_gcc_atomic_store_n="no"])])
+if test x"$pgac_cv_gcc_atomic_store_n" = x"yes"; then
+  AC_DEFINE(HAVE_GCC__ATOMIC_STORE_N, 1, [Define to 1 if you have __atomic_store_n(int64 *, int64 , int).])
+fi])# PGAC_HAVE_GCC__ATOMIC_STORE_N
+
 # PGAC_SSE42_CRC32_INTRINSICS
 # ---------------------------
 # Check if the compiler supports the x86 CRC instructions added in SSE 4.2,
@@ -683,6 +698,62 @@ if test x"$Ac_cachevar" = x"yes"; then
 fi
 undefine([Ac_cachevar])dnl
 ])# PGAC_LOONGARCH_CRC32C_INTRINSICS
+
+# PGAC_S390X_VECTOR_VX_INTRINSICS
+# --------------------------------
+# Check if the compiler supports the S390X vector intrinsics, using
+# __attribute__((vector_size(16))), vec_gfmsum_accum_128
+# 
+# These instructions where introduced with -march=z13.
+# the test arg1 is mandatory and should be either:
+# '-fzvector' for clang
+# '-mzarch' for gcc
+#
+# If the intrinsics are supported, sets
+# pgac_s390x_vector_intrinsics, and CFLAGS_CRC.
+AC_DEFUN([PGAC_S390X_VECTOR_VX_INTRINSICS],
+[define([Ac_cachevar], [AS_TR_SH([pgac_cv_s390x_vector_intrinsics_$1_$2])])dnl
+AC_CACHE_CHECK([for __attribute__((vector_size(16))), vec_gfmsum_accum_128 with CFLAGS=$1 $2], [Ac_cachevar],
+[pgac_save_CFLAGS=$CFLAGS
+CFLAGS="$pgac_save_CFLAGS $1 $2"
+AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <vecintrin.h>],
+  [unsigned long long a __attribute__((vector_size(16))) = { 0 };
+   unsigned long long b __attribute__((vector_size(16))) = { 0 };
+   unsigned char c __attribute__((vector_size(16))) = { 0 };
+   c = vec_gfmsum_accum_128(a, b, c);
+   return 0;])],
+  [Ac_cachevar=yes],
+  [Ac_cachevar=no])
+CFLAGS="$pgac_save_CFLAGS"])
+if test x"$Ac_cachevar" = x"yes"; then
+  CFLAGS_CRC="$1 $2"
+  AS_TR_SH([pgac_s390x_vector_intrinsics_$1_$2])=yes
+fi
+undefine([Ac_cachevar])dnl
+])# PGAC_S390X_VECTOR_VX_INTRINSICS
+
+# PGAC_S390X_BAD_VECTOR_INTRINSICS
+# ---------------------------
+#
+#
+# If the intrinsics are bad, sets pgac_s390x_bad_vector_intrinsics.
+AC_DEFUN([PGAC_S390X_BAD_VECTOR_INTRINSICS],
+[define([Ac_cachevar], [AS_TR_SH([pgac_cv_s390x_bad_vector_intrinsics])])dnl
+AC_CACHE_CHECK([for Compiler Version with known bad S390X Vector Intrinsics],[Ac_cachevar],
+[AC_LINK_IFELSE([AC_LANG_PROGRAM([],
+  [#ifdef __clang__
+   #  if ((__clang_major__ == 18) || (__clang_major__ == 19 && (__clang_minor__ < 1 || (__clang_minor__ == 1 && __clang_patchlevel__ < 2))))
+   # error CRC32-VX optimizations are broken due to compiler bug in Clang versions: 18.0.0 <= clang_version < 19.1.2. Either disable the CRC32-VX optimization, or switch to another compiler/compiler version.
+   #  endif
+   #endif
+   return 0;])],
+  [Ac_cachevar=yes],
+  [Ac_cachevar=no])])
+if test x"$Ac_cachevar" = x"yes"; then
+  pgac_s390x_bad_vector_intrinsics=no
+fi
+undefine([Ac_cachevar])dnl
+])# PGAC_S390X_BAD_VECTOR_INTRINSICS
 
 # PGAC_XSAVE_INTRINSICS
 # ---------------------
