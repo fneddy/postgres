@@ -17499,7 +17499,38 @@ if test x"$pgac_cv_gcc_atomic_int64_cas" = x"yes"; then
 $as_echo "#define HAVE_GCC__ATOMIC_INT64_CAS 1" >>confdefs.h
 
 fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for builtin __atomic int64 atomic store operations" >&5
+$as_echo_n "checking for builtin __atomic int64 atomic store operations... " >&6; }
+if ${pgac_cv_gcc_atomic_store_n+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <stdint.h>
+int
+main ()
+{
+int64_t val = 0;
+   __atomic_store_n(&val,1,__ATOMIC_SEQ_CST);
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv_gcc_atomic_store_n="yes"
+else
+  pgac_cv_gcc_atomic_store_n="no"
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv_gcc_atomic_store_n" >&5
+$as_echo "$pgac_cv_gcc_atomic_store_n" >&6; }
+if test x"$pgac_cv_gcc_atomic_store_n" = x"yes"; then
 
+$as_echo "#define HAVE_GCC__ATOMIC_STORE_N 1" >>confdefs.h
+
+fi
 
 # Check for x86 cpuid instruction
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for __get_cpuid" >&5
@@ -18047,6 +18078,212 @@ if test x"$pgac_cv_loongarch_crc32c_intrinsics" = x"yes"; then
 fi
 
 
+# Check for S390X Vector intrinsics to do CRC calculations.
+#
+# First check for the host cpu
+if test x"$host_cpu" = x"s390x"; then
+  # Second check if we have atomic store
+  if test x"$pgac_cv_gcc_atomic_store_n" = x"yes"; then
+    # Third check if we have a compiler with bad intrinsics
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for Compiler Version with known bad S390X Vector Intrinsics" >&5
+$as_echo_n "checking for Compiler Version with known bad S390X Vector Intrinsics... " >&6; }
+if ${pgac_cv_s390x_bad_vector_intrinsics+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+#ifdef __clang__
+   #  if ((__clang_major__ == 18) || (__clang_major__ == 19 && (__clang_minor__ < 1 || (__clang_minor__ == 1 && __clang_patchlevel__ < 2))))
+   # error CRC32-VX optimizations are broken due to compiler bug in Clang versions: 18.0.0 <= clang_version < 19.1.2. Either disable the CRC32-VX optimization, or switch to another compiler/compiler version.
+   #  endif
+   #endif
+   return 0;
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv_s390x_bad_vector_intrinsics=yes
+else
+  pgac_cv_s390x_bad_vector_intrinsics=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv_s390x_bad_vector_intrinsics" >&5
+$as_echo "$pgac_cv_s390x_bad_vector_intrinsics" >&6; }
+if test x"$pgac_cv_s390x_bad_vector_intrinsics" = x"yes"; then
+  pgac_s390x_bad_vector_intrinsics=no
+fi
+
+    if test x"$pgac_s390x_bad_vector_intrinsics" != x"yes"; then
+      # Finally check for all possible cflag combinations
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking for __attribute__((vector_size(16))), vec_gfmsum_accum_128 with CFLAGS=-fzvector " >&5
+$as_echo_n "checking for __attribute__((vector_size(16))), vec_gfmsum_accum_128 with CFLAGS=-fzvector ... " >&6; }
+if ${pgac_cv_s390x_vector_intrinsics__fzvector_+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  pgac_save_CFLAGS=$CFLAGS
+CFLAGS="$pgac_save_CFLAGS -fzvector "
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <vecintrin.h>
+int
+main ()
+{
+unsigned long long a __attribute__((vector_size(16))) = { 0 };
+   unsigned long long b __attribute__((vector_size(16))) = { 0 };
+   unsigned char c __attribute__((vector_size(16))) = { 0 };
+   c = vec_gfmsum_accum_128(a, b, c);
+   return 0;
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv_s390x_vector_intrinsics__fzvector_=yes
+else
+  pgac_cv_s390x_vector_intrinsics__fzvector_=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS="$pgac_save_CFLAGS"
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv_s390x_vector_intrinsics__fzvector_" >&5
+$as_echo "$pgac_cv_s390x_vector_intrinsics__fzvector_" >&6; }
+if test x"$pgac_cv_s390x_vector_intrinsics__fzvector_" = x"yes"; then
+  CFLAGS_CRC="-fzvector "
+  pgac_s390x_vector_intrinsics__fzvector_=yes
+fi
+
+      if test x"$pgac_s390x_vector_intrinsics__fzvector_" != x"yes"; then
+        { $as_echo "$as_me:${as_lineno-$LINENO}: checking for __attribute__((vector_size(16))), vec_gfmsum_accum_128 with CFLAGS=-fzvector -march=z13" >&5
+$as_echo_n "checking for __attribute__((vector_size(16))), vec_gfmsum_accum_128 with CFLAGS=-fzvector -march=z13... " >&6; }
+if ${pgac_cv_s390x_vector_intrinsics__fzvector__march_z13+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  pgac_save_CFLAGS=$CFLAGS
+CFLAGS="$pgac_save_CFLAGS -fzvector -march=z13"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <vecintrin.h>
+int
+main ()
+{
+unsigned long long a __attribute__((vector_size(16))) = { 0 };
+   unsigned long long b __attribute__((vector_size(16))) = { 0 };
+   unsigned char c __attribute__((vector_size(16))) = { 0 };
+   c = vec_gfmsum_accum_128(a, b, c);
+   return 0;
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv_s390x_vector_intrinsics__fzvector__march_z13=yes
+else
+  pgac_cv_s390x_vector_intrinsics__fzvector__march_z13=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS="$pgac_save_CFLAGS"
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv_s390x_vector_intrinsics__fzvector__march_z13" >&5
+$as_echo "$pgac_cv_s390x_vector_intrinsics__fzvector__march_z13" >&6; }
+if test x"$pgac_cv_s390x_vector_intrinsics__fzvector__march_z13" = x"yes"; then
+  CFLAGS_CRC="-fzvector -march=z13"
+  pgac_s390x_vector_intrinsics__fzvector__march_z13=yes
+fi
+
+        if test x"$pgac_s390x_vector_intrinsics__fzvector__march_z13" != x"yes"; then
+          { $as_echo "$as_me:${as_lineno-$LINENO}: checking for __attribute__((vector_size(16))), vec_gfmsum_accum_128 with CFLAGS=-mzarch " >&5
+$as_echo_n "checking for __attribute__((vector_size(16))), vec_gfmsum_accum_128 with CFLAGS=-mzarch ... " >&6; }
+if ${pgac_cv_s390x_vector_intrinsics__mzarch_+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  pgac_save_CFLAGS=$CFLAGS
+CFLAGS="$pgac_save_CFLAGS -mzarch "
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <vecintrin.h>
+int
+main ()
+{
+unsigned long long a __attribute__((vector_size(16))) = { 0 };
+   unsigned long long b __attribute__((vector_size(16))) = { 0 };
+   unsigned char c __attribute__((vector_size(16))) = { 0 };
+   c = vec_gfmsum_accum_128(a, b, c);
+   return 0;
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv_s390x_vector_intrinsics__mzarch_=yes
+else
+  pgac_cv_s390x_vector_intrinsics__mzarch_=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS="$pgac_save_CFLAGS"
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv_s390x_vector_intrinsics__mzarch_" >&5
+$as_echo "$pgac_cv_s390x_vector_intrinsics__mzarch_" >&6; }
+if test x"$pgac_cv_s390x_vector_intrinsics__mzarch_" = x"yes"; then
+  CFLAGS_CRC="-mzarch "
+  pgac_s390x_vector_intrinsics__mzarch_=yes
+fi
+
+            if test x"$pgac_s390x_vector_intrinsics__mzarch_" != x"yes"; then
+              { $as_echo "$as_me:${as_lineno-$LINENO}: checking for __attribute__((vector_size(16))), vec_gfmsum_accum_128 with CFLAGS=-mzarch -march=z13" >&5
+$as_echo_n "checking for __attribute__((vector_size(16))), vec_gfmsum_accum_128 with CFLAGS=-mzarch -march=z13... " >&6; }
+if ${pgac_cv_s390x_vector_intrinsics__mzarch__march_z13+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  pgac_save_CFLAGS=$CFLAGS
+CFLAGS="$pgac_save_CFLAGS -mzarch -march=z13"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <vecintrin.h>
+int
+main ()
+{
+unsigned long long a __attribute__((vector_size(16))) = { 0 };
+   unsigned long long b __attribute__((vector_size(16))) = { 0 };
+   unsigned char c __attribute__((vector_size(16))) = { 0 };
+   c = vec_gfmsum_accum_128(a, b, c);
+   return 0;
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  pgac_cv_s390x_vector_intrinsics__mzarch__march_z13=yes
+else
+  pgac_cv_s390x_vector_intrinsics__mzarch__march_z13=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS="$pgac_save_CFLAGS"
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pgac_cv_s390x_vector_intrinsics__mzarch__march_z13" >&5
+$as_echo "$pgac_cv_s390x_vector_intrinsics__mzarch__march_z13" >&6; }
+if test x"$pgac_cv_s390x_vector_intrinsics__mzarch__march_z13" = x"yes"; then
+  CFLAGS_CRC="-mzarch -march=z13"
+  pgac_s390x_vector_intrinsics__mzarch__march_z13=yes
+fi
+
+            fi
+        fi
+      fi
+    fi
+  fi
+fi
+
 
 
 # Select CRC-32C implementation.
@@ -18099,9 +18336,21 @@ if test x"$USE_SLICING_BY_8_CRC32C" = x"" && test x"$USE_SSE42_CRC32C" = x"" && 
           if test x"$pgac_loongarch_crc32c_intrinsics" = x"yes"; then
             USE_LOONGARCH_CRC32C=1
           else
-            # fall back to slicing-by-8 algorithm, which doesn't require any
-            # special CPU support.
-            USE_SLICING_BY_8_CRC32C=1
+            # Use S390X vector extension.
+            if (test x"$pgac_s390x_vector_intrinsics__fzvector_" = x"yes" ||
+               test x"$pgac_s390x_vector_intrinsics__mzarch_" = x"yes"); then
+              USE_S390X_CRC32C=1
+            else
+              # Use S390X vector extension with runtime check.
+              if test x"$pgac_s390x_vector_intrinsics__fzvector__march_z13" = x"yes" ||
+               test x"$pgac_s390x_vector_intrinsics__mzarch__march_z13" = x"yes"; then
+              USE_S390X_CRC32C_WITH_RUNTIME_CHECK=1
+              else
+                # fall back to slicing-by-8 algorithm, which doesn't require any
+                # special CPU support.
+                USE_SLICING_BY_8_CRC32C=1
+              fi
+            fi
           fi
         fi
       fi
@@ -18152,12 +18401,30 @@ $as_echo "#define USE_LOONGARCH_CRC32C 1" >>confdefs.h
           { $as_echo "$as_me:${as_lineno-$LINENO}: result: LoongArch CRCC instructions" >&5
 $as_echo "LoongArch CRCC instructions" >&6; }
         else
+          if test x"$USE_S390X_CRC32C" = x"1"; then
+
+$as_echo "#define USE_S390X_CRC32C 1" >>confdefs.h
+
+            PG_CRC32C_OBJS="pg_crc32c_s390x.o pg_crc32c_sb8.o"
+            { $as_echo "$as_me:${as_lineno-$LINENO}: result: S390X Vector instructions for CRC" >&5
+$as_echo "S390X Vector instructions for CRC" >&6; }
+          else
+            if test x"$USE_S390X_CRC32C_WITH_RUNTIME_CHECK" = x"1"; then
+
+$as_echo "#define USE_S390X_CRC32C_WITH_RUNTIME_CHECK 1" >>confdefs.h
+
+              PG_CRC32C_OBJS="pg_crc32c_s390x.o pg_crc32c_s390x_choose.o pg_crc32c_sb8.o"
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: S390X Vector instructions for CRC with runtime check" >&5
+$as_echo "S390X Vector instructions for CRC with runtime check" >&6; }
+            else
 
 $as_echo "#define USE_SLICING_BY_8_CRC32C 1" >>confdefs.h
 
-          PG_CRC32C_OBJS="pg_crc32c_sb8.o"
-          { $as_echo "$as_me:${as_lineno-$LINENO}: result: slicing-by-8" >&5
+              PG_CRC32C_OBJS="pg_crc32c_sb8.o"
+              { $as_echo "$as_me:${as_lineno-$LINENO}: result: slicing-by-8" >&5
 $as_echo "slicing-by-8" >&6; }
+            fi
+          fi
         fi
       fi
     fi
