@@ -426,7 +426,7 @@ refresh_matview_datafill(DestReceiver *dest, Query *query,
 	CHECK_FOR_INTERRUPTS();
 
 	/* Plan the query which will generate data for the refresh. */
-	plan = pg_plan_query(query, queryString, CURSOR_OPT_PARALLEL_OK, NULL);
+	plan = pg_plan_query(query, queryString, CURSOR_OPT_PARALLEL_OK, NULL, NULL);
 
 	/*
 	 * Use a snapshot with an updated command ID to ensure this query sees
@@ -835,7 +835,8 @@ refresh_by_match_merge(Oid matviewOid, Oid tempOid, Oid relowner,
 	if (!foundUniqueIndex)
 		ereport(ERROR,
 				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				errmsg("could not find suitable unique index on materialized view"));
+				errmsg("could not find suitable unique index on materialized view \"%s\"",
+					   RelationGetRelationName(matviewRel)));
 
 	appendStringInfoString(&querybuf,
 						   " AND newdata.* OPERATOR(pg_catalog.*=) mv.*) "

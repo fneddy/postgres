@@ -1867,18 +1867,30 @@ ExecQueryAndProcessResults(const char *query,
 		{
 			FILE	   *copy_stream = NULL;
 
-			if (pset.piped_syncs > 1)
+			if (PQpipelineStatus(pset.db) != PQ_PIPELINE_OFF)
 			{
 				/*
-				 * When reading COPY data, the backend ignores sync messages
-				 * and will not send a matching ReadyForQuery response.  Even
-				 * if we adjust piped_syncs and requested_results, it is not
-				 * possible to salvage this as the sync message would still be
-				 * in libpq's command queue and we would be stuck in a busy
-				 * pipeline state.  Thus, we abort the connection to avoid
-				 * this state.
+				 * Running COPY within a pipeline can break the protocol
+				 * synchronisation in multiple ways, and psql shows its limits
+				 * when it comes to tracking this information.
+				 *
+				 * While in COPY mode, the backend process ignores additional
+				 * Sync messages and will not send the matching ReadyForQuery
+				 * expected by the frontend.
+				 *
+				 * Additionally, libpq automatically sends a Sync with the
+				 * Copy message, creating an unexpected synchronisation point.
+				 * A failure during COPY would leave the pipeline in an
+				 * aborted state while the backend would be in a clean state,
+				 * ready to process commands.
+				 *
+				 * Improving those issues would require modifications in how
+				 * libpq handles pipelines and COPY.  Hence, for the time
+				 * being, we forbid the use of COPY within a pipeline,
+				 * aborting the connection to avoid an inconsistent state on
+				 * psql side if trying to use a COPY command.
 				 */
-				pg_log_info("\\syncpipeline after COPY is not supported, aborting connection");
+				pg_log_info("COPY in a pipeline is not supported, aborting connection");
 				exit(EXIT_BADCONN);
 			}
 
@@ -2519,6 +2531,41 @@ session_username(void)
 		return PQuser(pset.db);
 }
 
+/*
+ * Return the value of option for keyword in the current connection.
+ *
+ * The caller is responsible for freeing the result value allocated.
+ */
+char *
+get_conninfo_value(const char *keyword)
+{
+	PQconninfoOption *opts;
+	PQconninfoOption *serviceopt = NULL;
+	char	   *res = NULL;
+
+	if (pset.db == NULL)
+		return NULL;
+
+	opts = PQconninfo(pset.db);
+	if (opts == NULL)
+		return NULL;
+
+	for (PQconninfoOption *opt = opts; opt->keyword != NULL; ++opt)
+	{
+		if (strcmp(opt->keyword, keyword) == 0)
+		{
+			serviceopt = opt;
+			break;
+		}
+	}
+
+	/* Take a copy of the value, as it is freed by PQconninfoFree(). */
+	if (serviceopt && serviceopt->val != NULL)
+		res = pg_strdup(serviceopt->val);
+	PQconninfoFree(opts);
+
+	return res;
+}
 
 /* expand_tilde
  *
@@ -2616,7 +2663,7 @@ clean_extended_state(void)
 
 	switch (pset.send_mode)
 	{
-		case PSQL_SEND_EXTENDED_CLOSE:	/* \close */
+		case PSQL_SEND_EXTENDED_CLOSE:	/* \close_prepared */
 			free(pset.stmtName);
 			break;
 		case PSQL_SEND_EXTENDED_PARSE:	/* \parse */

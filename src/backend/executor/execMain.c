@@ -84,7 +84,6 @@ static void ExecutePlan(QueryDesc *queryDesc,
 						uint64 numberTuples,
 						ScanDirection direction,
 						DestReceiver *dest);
-static bool ExecCheckOneRelPerms(RTEPermissionInfo *perminfo);
 static bool ExecCheckPermissionsModified(Oid relOid, Oid userid,
 										 Bitmapset *modifiedCols,
 										 AclMode requiredPerms);
@@ -643,7 +642,7 @@ ExecCheckPermissions(List *rangeTable, List *rteperminfos,
  * ExecCheckOneRelPerms
  *		Check access permissions for a single relation.
  */
-static bool
+bool
 ExecCheckOneRelPerms(RTEPermissionInfo *perminfo)
 {
 	AclMode		requiredPerms;
@@ -1037,6 +1036,9 @@ InitPlan(QueryDesc *queryDesc, int eflags)
  * Generally the parser and/or planner should have noticed any such mistake
  * already, but let's make sure.
  *
+ * For INSERT ON CONFLICT, the result relation is required to support the
+ * onConflictAction, regardless of whether a conflict actually occurs.
+ *
  * For MERGE, mergeActions is the list of actions that may be performed.  The
  * result relation is required to support every action, regardless of whether
  * or not they are all executed.
@@ -1046,7 +1048,7 @@ InitPlan(QueryDesc *queryDesc, int eflags)
  */
 void
 CheckValidResultRel(ResultRelInfo *resultRelInfo, CmdType operation,
-					List *mergeActions)
+					OnConflictAction onConflictAction, List *mergeActions)
 {
 	Relation	resultRel = resultRelInfo->ri_RelationDesc;
 	FdwRoutine *fdwroutine;
@@ -1059,7 +1061,23 @@ CheckValidResultRel(ResultRelInfo *resultRelInfo, CmdType operation,
 	{
 		case RELKIND_RELATION:
 		case RELKIND_PARTITIONED_TABLE:
-			CheckCmdReplicaIdentity(resultRel, operation);
+
+			/*
+			 * For MERGE, check that the target relation supports each action.
+			 * For other operations, just check the operation itself.
+			 */
+			if (operation == CMD_MERGE)
+				foreach_node(MergeAction, action, mergeActions)
+					CheckCmdReplicaIdentity(resultRel, action->commandType);
+			else
+				CheckCmdReplicaIdentity(resultRel, operation);
+
+			/*
+			 * For INSERT ON CONFLICT DO UPDATE, additionally check that the
+			 * target relation supports UPDATE.
+			 */
+			if (onConflictAction == ONCONFLICT_UPDATE)
+				CheckCmdReplicaIdentity(resultRel, CMD_UPDATE);
 			break;
 		case RELKIND_SEQUENCE:
 			ereport(ERROR,
@@ -3067,6 +3085,18 @@ EvalPlanQualStart(EPQState *epqstate, Plan *planTree)
 	rcestate->es_unpruned_relids = parentestate->es_unpruned_relids;
 
 	/*
+	 * Also make the PartitionPruneInfo and the results of pruning available.
+	 * These need to match exactly so that we initialize all the same Append
+	 * and MergeAppend subplans as the parent did.
+	 */
+	rcestate->es_part_prune_infos = parentestate->es_part_prune_infos;
+	rcestate->es_part_prune_states = parentestate->es_part_prune_states;
+	rcestate->es_part_prune_results = parentestate->es_part_prune_results;
+
+	/* We'll also borrow the es_partition_directory from the parent state */
+	rcestate->es_partition_directory = parentestate->es_partition_directory;
+
+	/*
 	 * Initialize private state information for each SubPlan.  We must do this
 	 * before running ExecInitNode on the main query tree, since
 	 * ExecInitSubPlan expects to be able to find these entries. Some of the
@@ -3182,6 +3212,13 @@ EvalPlanQualEnd(EPQState *epqstate)
 	ExecCloseResultRelations(estate);
 
 	MemoryContextSwitchTo(oldcontext);
+
+	/*
+	 * NULLify the partition directory before freeing the executor state.
+	 * Since EvalPlanQualStart() just borrowed the parent EState's directory,
+	 * we'd better leave it up to the parent to delete it.
+	 */
+	estate->es_partition_directory = NULL;
 
 	FreeExecutorState(estate);
 

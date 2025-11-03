@@ -229,6 +229,9 @@
 /* Define to 1 if you have the global variable 'int timezone'. */
 #undef HAVE_INT_TIMEZONE
 
+/* Define to 1 if you have the `io_uring_queue_init_mem' function. */
+#undef HAVE_IO_URING_QUEUE_INIT_MEM
+
 /* Define to 1 if __builtin_constant_p(x) implies "i"(x) acceptance. */
 #undef HAVE_I_CONSTRAINT__BUILTIN_CONSTANT_P
 
@@ -665,6 +668,9 @@
 
 /* Define to 1 to use ARMv8 CRC Extension with a runtime check. */
 #undef USE_ARMV8_CRC32C_WITH_RUNTIME_CHECK
+
+/* Define to 1 to use S390X CRC Algorithm with a runtime check. */
+#undef USE_S390X_CRC32C_WITH_RUNTIME_CHECK
 
 /* Define to 1 to build with assertion checks. (--enable-cassert) */
 #undef USE_ASSERT_CHECKING

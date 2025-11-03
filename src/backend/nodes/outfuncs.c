@@ -363,7 +363,7 @@ outDatum(StringInfo str, Datum value, int typlen, bool typbyval)
 	else
 	{
 		s = (char *) DatumGetPointer(value);
-		if (!PointerIsValid(s))
+		if (!s)
 			appendStringInfoString(str, "0 [ ]");
 		else
 		{
@@ -653,6 +653,8 @@ _outA_Expr(StringInfo str, const A_Expr *node)
 
 	WRITE_NODE_FIELD(lexpr);
 	WRITE_NODE_FIELD(rexpr);
+	WRITE_LOCATION_FIELD(rexpr_list_start);
+	WRITE_LOCATION_FIELD(rexpr_list_end);
 	WRITE_LOCATION_FIELD(location);
 }
 

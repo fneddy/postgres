@@ -103,6 +103,9 @@ GetSubscription(Oid subid, bool missing_ok)
 	sub->passwordrequired = subform->subpasswordrequired;
 	sub->runasowner = subform->subrunasowner;
 	sub->failover = subform->subfailover;
+	sub->retaindeadtuples = subform->subretaindeadtuples;
+	sub->maxretention = subform->submaxretention;
+	sub->retentionactive = subform->subretentionactive;
 
 	/* Get conninfo */
 	datum = SysCacheGetAttrNotNull(SUBSCRIPTIONOID,
@@ -319,7 +322,7 @@ AddSubscriptionRelState(Oid subid, Oid relid, char state,
  */
 void
 UpdateSubscriptionRelState(Oid subid, Oid relid, char state,
-						   XLogRecPtr sublsn)
+						   XLogRecPtr sublsn, bool already_locked)
 {
 	Relation	rel;
 	HeapTuple	tup;
@@ -327,9 +330,24 @@ UpdateSubscriptionRelState(Oid subid, Oid relid, char state,
 	Datum		values[Natts_pg_subscription_rel];
 	bool		replaces[Natts_pg_subscription_rel];
 
-	LockSharedObject(SubscriptionRelationId, subid, 0, AccessShareLock);
+	if (already_locked)
+	{
+#ifdef USE_ASSERT_CHECKING
+		LOCKTAG		tag;
 
-	rel = table_open(SubscriptionRelRelationId, RowExclusiveLock);
+		Assert(CheckRelationOidLockedByMe(SubscriptionRelRelationId,
+										  RowExclusiveLock, true));
+		SET_LOCKTAG_OBJECT(tag, InvalidOid, SubscriptionRelationId, subid, 0);
+		Assert(LockHeldByMe(&tag, AccessShareLock, true));
+#endif
+
+		rel = table_open(SubscriptionRelRelationId, NoLock);
+	}
+	else
+	{
+		LockSharedObject(SubscriptionRelationId, subid, 0, AccessShareLock);
+		rel = table_open(SubscriptionRelRelationId, RowExclusiveLock);
+	}
 
 	/* Try finding existing mapping. */
 	tup = SearchSysCacheCopy2(SUBSCRIPTIONRELMAP,
@@ -488,13 +506,13 @@ RemoveSubscriptionRel(Oid subid, Oid relid)
 }
 
 /*
- * Does the subscription have any relations?
+ * Does the subscription have any tables?
  *
  * Use this function only to know true/false, and when you have no need for the
  * List returned by GetSubscriptionRelations.
  */
 bool
-HasSubscriptionRelations(Oid subid)
+HasSubscriptionTables(Oid subid)
 {
 	Relation	rel;
 	ScanKeyData skey[1];
@@ -581,4 +599,43 @@ GetSubscriptionRelations(Oid subid, bool not_ready)
 	table_close(rel, AccessShareLock);
 
 	return res;
+}
+
+/*
+ * Update the dead tuple retention status for the given subscription.
+ */
+void
+UpdateDeadTupleRetentionStatus(Oid subid, bool active)
+{
+	Relation	rel;
+	bool		nulls[Natts_pg_subscription];
+	bool		replaces[Natts_pg_subscription];
+	Datum		values[Natts_pg_subscription];
+	HeapTuple	tup;
+
+	/* Look up the subscription in the catalog */
+	rel = table_open(SubscriptionRelationId, RowExclusiveLock);
+	tup = SearchSysCacheCopy1(SUBSCRIPTIONOID, ObjectIdGetDatum(subid));
+
+	if (!HeapTupleIsValid(tup))
+		elog(ERROR, "cache lookup failed for subscription %u", subid);
+
+	LockSharedObject(SubscriptionRelationId, subid, 0, AccessShareLock);
+
+	/* Form a new tuple. */
+	memset(values, 0, sizeof(values));
+	memset(nulls, false, sizeof(nulls));
+	memset(replaces, false, sizeof(replaces));
+
+	/* Set the subscription to disabled. */
+	values[Anum_pg_subscription_subretentionactive - 1] = active;
+	replaces[Anum_pg_subscription_subretentionactive - 1] = true;
+
+	/* Update the catalog */
+	tup = heap_modify_tuple(tup, RelationGetDescr(rel), values, nulls,
+							replaces);
+	CatalogTupleUpdate(rel, &tup->t_self, tup);
+	heap_freetuple(tup);
+
+	table_close(rel, NoLock);
 }
